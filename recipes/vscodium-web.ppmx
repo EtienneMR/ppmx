@@ -1,0 +1,23 @@
+REPO = "VSCodium/vscodium"
+
+
+def latest_version():
+    return github.latest_release(REPO)
+
+
+def build(ctx):
+    asset_name = f"vscodium-reh-web-linux-x64-{ctx.version}.tar.gz"
+    dist_name = "vscodium-web"
+
+    ctx.download(
+        github.asset_url(REPO, ctx.version, asset_name),
+        asset_name,
+    )
+    ctx.run("mkdir", dist_name)
+    ctx.run("tar", "-xzf", asset_name, "-C", dist_name)
+
+    return dist_name
+
+
+def install(ctx):
+    ctx.exe("bin/codium-server", "codium-server")

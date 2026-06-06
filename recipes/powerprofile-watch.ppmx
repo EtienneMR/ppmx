@@ -1,0 +1,79 @@
+def latest_version():
+    return "v0.1.0"
+
+
+def build(ctx):
+    ctx.write(
+        "powerprofile-watch.sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+
+apps=(
+  steam
+  prismlauncher
+)
+
+HIGH_MODE=performance
+DEFAULT_MODE=balanced
+
+old_mode="$DEFAULT_MODE"
+boosted=0
+
+cleanup() {
+    if [[ $boosted -eq 1 ]]; then
+        powerprofilesctl set "$old_mode" || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+while true; do
+    found=0
+
+    for app in "${apps[@]}"; do
+        if pgrep -x "$app" >/dev/null; then
+            found=1
+            break
+        fi
+    done
+
+    if [[ $found -eq 1 && $boosted -eq 0 ]]; then
+        old_mode="$(powerprofilesctl get)"
+        [[ "$old_mode" == "$HIGH_MODE" ]] && old_mode="$DEFAULT_MODE"
+        boosted=1
+        powerprofilesctl set "$HIGH_MODE"
+    elif [[ $found -eq 0 && $boosted -eq 1 ]]; then
+        powerprofilesctl set "$old_mode"
+        boosted=0
+    fi
+
+    sleep 5
+done
+""",
+    )
+    ctx.run("chmod", "+x", "powerprofile-watch.sh")
+
+    ctx.write(
+        "powerprofile-watch.service",
+        """[Unit]
+Description=Switch power profile while games are running
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/powerprofile-watch
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+""",
+    )
+
+    return "."
+
+def install(ctx):
+    ctx.exe("powerprofile-watch.sh", "powerprofile-watch")
+    ctx.config(
+        "powerprofile-watch.service",
+        "systemd/user/powerprofile-watch.service"
+    )

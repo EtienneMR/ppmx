@@ -1,0 +1,24 @@
+REPO = "EtienneMR/tbx"
+
+
+def latest_version():
+    return github.latest_release(REPO)
+
+
+def build(ctx):
+    ctx.download(
+        github.asset_url(REPO, ctx.version, "tbx-linux"),
+        "tbx",
+    )
+
+    ctx.run("chmod", "+x", "tbx")
+
+    comp = ctx.run("./tbx", "completion", "zsh")
+    ctx.run("mkdir", "-p", "completions/zsh")
+    ctx.write("completions/zsh/_tbx", comp)
+
+    return "."
+
+def install(ctx):
+    ctx.exe("tbx", "tbx")
+    ctx.share("completions/zsh/_tbx", "zsh/site-functions/_tbx")
