@@ -50,7 +50,7 @@ impl RecipeExecutor {
             .expect("extra defined in eval_recipe")
     }
 
-    pub fn run_latest_version(&self, recipe: ParsedRecipe) -> anyhow::Result<String> {
+    pub fn run_latest_version(&self, recipe: &ParsedRecipe) -> anyhow::Result<String> {
         self.eval_recipe(recipe, |mut eval| {
             let function = eval
                 .module()
@@ -69,7 +69,7 @@ impl RecipeExecutor {
 
     pub fn run_build(
         &self,
-        recipe: ParsedRecipe,
+        recipe: &ParsedRecipe,
         version: String,
         working_directory: PathBuf,
     ) -> anyhow::Result<PathBuf> {
@@ -93,7 +93,7 @@ impl RecipeExecutor {
         })
     }
 
-    pub fn run_install(&self, recipe: ParsedRecipe) -> anyhow::Result<Vec<PackageAsset>> {
+    pub fn run_install(&self, recipe: &ParsedRecipe) -> anyhow::Result<Vec<PackageAsset>> {
         self.eval_recipe(recipe, |mut eval| {
             let function = eval
                 .module()
@@ -111,13 +111,13 @@ impl RecipeExecutor {
 
     fn eval_recipe<R>(
         &self,
-        recipe: ParsedRecipe,
+        recipe: &ParsedRecipe,
         f: impl FnOnce(Evaluator) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
         Module::with_temp_heap(|module| {
             let mut eval = Evaluator::new(&module);
             eval.extra = Some(self);
-            eval.eval_module(recipe.ast, &self.globals)
+            eval.eval_module(recipe.ast.clone(), &self.globals)
                 .map_err(|e| e.into_anyhow())?;
 
             f(eval)
@@ -127,13 +127,15 @@ impl RecipeExecutor {
 
 #[derive(Debug, Clone)]
 pub struct ParsedRecipe {
+    pub name: String,
+    pub url: String,
     ast: AstModule,
 }
 
 impl ParsedRecipe {
-    pub fn from_content(filename: &str, content: String) -> anyhow::Result<Self> {
+    pub fn from_content(name: String, url: String, content: String) -> anyhow::Result<Self> {
         let ast = AstModule::parse(
-            filename,
+            &url,
             content,
             &Dialect {
                 enable_f_strings: true,
@@ -143,11 +145,11 @@ impl ParsedRecipe {
         .map_err(|e| e.into_anyhow())
         .context("failled to parse content")?;
 
-        Ok(Self { ast })
+        Ok(Self { name, ast, url })
     }
 
-    pub fn from_filename(filename: &str) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(filename).context("failled to read file")?;
-        Self::from_content(filename, content)
+    pub fn from_filename(name: String, filename: &str) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(&filename).context("failled to read file")?;
+        Self::from_content(name, "file://".to_string() + filename, content)
     }
 }

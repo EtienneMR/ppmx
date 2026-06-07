@@ -6,23 +6,23 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use allocative::Allocative;
-use anyhow::Context;
 use anyhow::bail;
+use anyhow::Context;
 use starlark::environment::Methods;
 use starlark::environment::MethodsBuilder;
 use starlark::environment::MethodsStatic;
 use starlark::eval::Evaluator;
 use starlark::starlark_module;
+use starlark::values::list_or_tuple::UnpackListOrTuple;
+use starlark::values::none::NoneType;
 use starlark::values::NoSerialize;
 use starlark::values::ProvidesStaticType;
 use starlark::values::StarlarkValue;
 use starlark::values::Value;
 use starlark::values::ValueLike;
-use starlark::values::list_or_tuple::UnpackListOrTuple;
-use starlark::values::none::NoneType;
+use starlark_derive::starlark_value;
 use starlark_derive::StarlarkAttrs;
 use starlark_derive::Trace;
-use starlark_derive::starlark_value;
 
 use crate::executor::RecipeExecutor;
 

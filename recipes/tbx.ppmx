@@ -13,12 +13,16 @@ def build(ctx):
 
     ctx.run("chmod", "+x", "tbx")
 
+    ctx.run("mkdir", "-p", "completions")
     comp = ctx.run("./tbx", "completion", "zsh")
-    ctx.run("mkdir", "-p", "completions/zsh")
-    ctx.write("completions/zsh/_tbx", comp)
+    ctx.write("completions/zsh", comp)
+    
+    comp = ctx.run("./tbx", "completion", "bash")
+    ctx.write("completions/bash", comp)
 
     return "."
 
 def install(ctx):
     ctx.exe("tbx", "tbx")
-    ctx.share("completions/zsh/_tbx", "zsh/site-functions/_tbx")
+    ctx.share("completions/zsh", "zsh/site-functions/_tbx")
+    ctx.share("completions/bash", "bash-completion/completions/tbx")

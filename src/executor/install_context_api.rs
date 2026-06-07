@@ -8,14 +8,14 @@ use starlark::environment::Methods;
 use starlark::environment::MethodsBuilder;
 use starlark::environment::MethodsStatic;
 use starlark::starlark_module;
+use starlark::values::none::NoneType;
 use starlark::values::NoSerialize;
 use starlark::values::ProvidesStaticType;
 use starlark::values::StarlarkValue;
 use starlark::values::Value;
 use starlark::values::ValueLike;
-use starlark::values::none::NoneType;
-use starlark_derive::Trace;
 use starlark_derive::starlark_value;
+use starlark_derive::Trace;
 
 use crate::shared::PackageAsset;
 use crate::shared::PackageAssetKind;

@@ -1813,6 +1813,7 @@ dependencies = [
  "anyhow",
  "reqwest",
  "serde",
+ "serde_json",
  "starlark",
  "starlark_derive",
 ]
