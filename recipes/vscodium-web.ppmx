@@ -6,7 +6,13 @@ def latest_version():
 
 
 def build(ctx):
-    asset_name = f"vscodium-reh-web-linux-x64-{ctx.version}.tar.gz"
+    arch = {
+        "x86_64": "x64",
+        "aarch64": "arm64",
+        "arm": "armhf",
+    }[ctx.arch]
+
+    asset_name = f"vscodium-reh-web-{ctx.os}-{arch}-{ctx.version}.tar.gz"
     dist_name = "vscodium-web"
 
     ctx.download(

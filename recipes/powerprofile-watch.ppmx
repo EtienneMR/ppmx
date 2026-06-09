@@ -1,5 +1,5 @@
 def latest_version():
-    return "v0.1.0"
+    return "0.1.0"
 
 
 def build(ctx):

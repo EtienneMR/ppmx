@@ -2,12 +2,12 @@ REPO = "EtienneMR/tbx"
 
 
 def latest_version():
-    return github.latest_release(REPO)
+    return github.latest_release(REPO).removeprefix("v")
 
 
 def build(ctx):
     ctx.download(
-        github.asset_url(REPO, ctx.version, "tbx-linux"),
+        github.asset_url(REPO, f"v{ctx.version}", f"tbx-{ctx.os}"),
         "tbx",
     )
 

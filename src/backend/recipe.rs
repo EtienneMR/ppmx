@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    env::consts,
     fmt,
     fs::{self, OpenOptions},
     io::BufWriter,
@@ -187,6 +188,8 @@ fn github_module(builder: &mut GlobalsBuilder) {
 #[derive(Debug, ProvidesStaticType, NoSerialize, Allocative, Trace, StarlarkAttrs)]
 struct BuildContext {
     version: String,
+    os: &'static str,
+    arch: &'static str,
 
     #[starlark(skip)]
     data: RefCell<BuildResult>,
@@ -196,6 +199,8 @@ impl BuildContext {
     fn new(version: String, working_directory: PathBuf) -> Self {
         Self {
             version,
+            os: consts::OS,
+            arch: consts::ARCH,
             data: RefCell::new(BuildResult {
                 build_directory: working_directory,
                 ..BuildResult::default()

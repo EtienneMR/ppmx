@@ -81,7 +81,7 @@ impl ServerList {
         &self,
         package_name: &str,
         http_client: &reqwest::blocking::Client,
-    ) -> Result<String> {
+    ) -> Result<(String, OsString)> {
         info!("finding server of {package_name}");
         let servers = self.list().context("listing configured servers")?;
 
@@ -91,15 +91,15 @@ impl ServerList {
 
         let mut last_error: Option<String> = None;
 
-        for server in &servers {
+        for server in servers.into_iter() {
             let (mut url, suffix) = self
-                .get_url(server)
+                .get_url(&server)
                 .with_context(|| format!("building URL for server {server:?}"))?;
 
             url.push_str(package_name);
             url.push_str(&suffix);
 
-            debug!("querying server for package {package_name} at {url}");
+            debug!("querying server {server:?} for package {package_name} at {url}");
 
             let response = http_client
                 .head(&url)
@@ -109,7 +109,7 @@ impl ServerList {
             let status = response.status();
 
             if status.is_success() {
-                return Ok(url);
+                return Ok((url, server));
             }
 
             match status {

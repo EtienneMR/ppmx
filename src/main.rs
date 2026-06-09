@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 mod backend;
-mod cli;
+mod frontend;
 
 fn main() -> Result<()> {
-    cli::run()
+    frontend::run()
 }

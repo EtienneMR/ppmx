@@ -1,0 +1,23 @@
+REPO = "cloudflare/cloudflared"
+
+
+def latest_version():
+    return github.latest_release(REPO)
+
+
+def build(ctx):
+    arch = {
+        "x86_64": "amd64",
+        "aarch64": "arm64",
+        "arm": "arm",
+    }[ctx.arch]
+
+    ctx.download(
+        github.asset_url(REPO, ctx.version, f"cloudflared-{ctx.os}-{arch}"),
+        "cloudflared",
+    )
+
+    ctx.run("chmod", "+x", "cloudflared")
+
+    ctx.export_root(".")
+    ctx.export_exe("cloudflared", "cloudflared")

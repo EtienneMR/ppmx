@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use log::{debug, info};
 use std::path::PathBuf;
 
-pub use installer::InstalledPackageList;
+pub use installer::{InstalledPackage, InstalledPackageList};
 pub use recipe::RecipeExecutor;
 pub use server::ServerList;
 
@@ -28,36 +28,37 @@ pub struct ResolvedPackage {
 }
 
 impl ResolvedPackage {
+    pub fn new(name: String, version: String, recipe_url: String, recipe: recipe::Recipe) -> Self {
+        Self {
+            name,
+            version,
+            recipe_url,
+            recipe,
+        }
+    }
+
     pub fn resolve(
         name: &str,
         recipe_url: &str,
         http_client: &reqwest::blocking::Client,
+        recipe_executor: &RecipeExecutor,
     ) -> Result<Self> {
         info!("resolving package {name} at {recipe_url}");
 
-        let response = http_client
-            .get(recipe_url)
-            .send()
-            .with_context(|| format!("sending recipe request to {recipe_url}"))?
-            .error_for_status()
-            .with_context(|| format!("fetching recipe from {recipe_url}"))?
-            .text()
-            .context("reading recipe response body")?;
-
-        debug!("recipe:\n{}", &response);
-
-        let recipe = recipe::Recipe::from_content(recipe_url, response)?;
-        let version =
-            recipe::RecipeExecutor::new(http_client.clone()).eval_latest_version(&recipe)?;
+        let source_recipe = fetch_recipe(recipe_url, http_client)
+            .with_context(|| format!("fetching recipe of {name}"))?;
+        let recipe = recipe::Recipe::from_content(recipe_url, source_recipe)
+            .with_context(|| format!("parsing recipe of {name}"))?;
+        let version = recipe_executor.eval_latest_version(&recipe)?;
 
         debug!("version: {}", version);
 
-        Ok(Self {
-            name: name.to_owned(),
-            recipe_url: recipe_url.to_owned(),
-            recipe,
+        Ok(Self::new(
+            name.to_owned(),
             version,
-        })
+            recipe_url.to_owned(),
+            recipe,
+        ))
     }
 
     pub fn name(&self) -> &str {
@@ -67,6 +68,21 @@ impl ResolvedPackage {
     pub fn version(&self) -> &str {
         &self.version
     }
+}
+
+pub fn fetch_recipe(recipe_url: &str, http_client: &reqwest::blocking::Client) -> Result<String> {
+    let source = http_client
+        .get(recipe_url)
+        .send()
+        .with_context(|| format!("sending recipe request to {recipe_url}"))?
+        .error_for_status()
+        .with_context(|| format!("fetching recipe at {recipe_url}"))?
+        .text()
+        .with_context(|| format!("reading recipe response body from {recipe_url}"))?;
+
+    debug!("fetched recipe at {recipe_url}:\n{source}");
+
+    Ok(source)
 }
 
 // PRIVATE

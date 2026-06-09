@@ -29,6 +29,14 @@ impl InstalledPackage {
     pub fn version(&self) -> &str {
         &self.data.version
     }
+
+    pub fn recipe_url(&self) -> &str {
+        &self.data.recipe_url
+    }
+
+    pub fn owned_files(&self) -> &[PathBuf] {
+        &self.data.owned_files
+    }
 }
 
 pub struct InstalledPackageList {
