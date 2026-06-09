@@ -1,0 +1,27 @@
+REPO = "EtienneMR/ppmx"
+
+
+def latest_version():
+    return github.latest_release(REPO)
+
+
+def build(ctx):
+    ctx.download(
+        github.asset_url(REPO, ctx.version, "ppmx-linux"),
+        "ppmx",
+    )
+
+    ctx.run("chmod", "+x", "ppmx")
+
+    ctx.run("mkdir", "-p", "completions")
+    comp = ctx.run("./ppmx", "completions", "zsh")
+    ctx.write("completions/zsh", comp)
+    
+    comp = ctx.run("./ppmx", "completions", "bash")
+    ctx.write("completions/bash", comp)
+
+
+    ctx.export_root(".")
+    ctx.export_exe("ppmx", "ppmx")
+    ctx.export_share("completions/zsh", "zsh/site-functions/_ppmx")
+    ctx.export_share("completions/bash", "bash-completion/completions/ppmx")
