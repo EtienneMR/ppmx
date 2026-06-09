@@ -16,8 +16,6 @@ def build(ctx):
     ctx.run("mkdir", dist_name)
     ctx.run("tar", "-xzf", asset_name, "-C", dist_name)
 
-    return dist_name
 
-
-def install(ctx):
-    ctx.exe("bin/codium-server", "codium-server")
+    ctx.export_root(dist_name)
+    ctx.export_exe("bin/codium-server", "codium-web")

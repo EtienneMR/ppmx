@@ -20,9 +20,8 @@ def build(ctx):
     comp = ctx.run("./tbx", "completion", "bash")
     ctx.write("completions/bash", comp)
 
-    return "."
 
-def install(ctx):
-    ctx.exe("tbx", "tbx")
-    ctx.share("completions/zsh", "zsh/site-functions/_tbx")
-    ctx.share("completions/bash", "bash-completion/completions/tbx")
+    ctx.export_root(".")
+    ctx.export_exe("tbx", "tbx")
+    ctx.export_share("completions/zsh", "zsh/site-functions/_tbx")
+    ctx.export_share("completions/bash", "bash-completion/completions/tbx")

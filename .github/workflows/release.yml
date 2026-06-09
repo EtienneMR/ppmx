@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        shell: bash
+        run: |
+          cargo build --release
+          mkdir -p dist
+          cp target/release/ppmx dist/ppmx-linux
+          chmod +x dist/ppmx-linux
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+
+          echo "## What's Changed" > changelog.md
+          echo "" >> changelog.md
+
+          FEATURES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --grep="^feat" | sed 's/^feat[:(].*[):] */- /')
+          if [ -n "$FEATURES" ]; then
+            echo "### ✨ Features" >> changelog.md
+            echo "$FEATURES" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          FIXES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --grep="^fix" | sed 's/^fix[:(].*[):] */- /')
+          if [ -n "$FIXES" ]; then
+            echo "### 🐛 Bug Fixes" >> changelog.md
+            echo "$FIXES" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          OTHER=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --invert-grep --grep="^feat" --grep="^fix" | sed 's/^/- /')
+          if [ -n "$OTHER" ]; then
+            echo "### 🔧 Other Changes" >> changelog.md
+            echo "$OTHER" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          echo "---" >> changelog.md
+          echo "" >> changelog.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$LAST_TAG...${GITHUB_REF_NAME}" >> changelog.md
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Release ${GITHUB_REF_NAME}" \
+            --notes-file changelog.md \
+            dist/*

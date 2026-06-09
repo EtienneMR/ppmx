@@ -69,11 +69,9 @@ WantedBy=default.target
 """,
     )
 
-    return "."
-
-def install(ctx):
-    ctx.exe("powerprofile-watch.sh", "powerprofile-watch")
-    ctx.config(
+    ctx.export_root(".")
+    ctx.export_exe("powerprofile-watch.sh", "powerprofile-watch")
+    ctx.export_config(
         "powerprofile-watch.service",
         "systemd/user/powerprofile-watch.service"
     )
