@@ -3,10 +3,12 @@ use std::{collections::BTreeMap, fs, io::ErrorKind, path::PathBuf};
 use anyhow::{Context, Result, bail};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
+use ureq::Agent;
 
 use crate::backend::{
     ResolvedPackage, Scope,
-    recipe::{BuildExportKind, BuildResult, RecipeExecutor},
+    recipe::{BuildExportKind, BuildResult},
+    run_build,
 };
 
 // PUBLIC
@@ -72,13 +74,13 @@ impl InstalledPackageList {
         }
     }
 
-    pub fn install(&self, package: &ResolvedPackage, executor: &RecipeExecutor) -> Result<()> {
+    pub fn install(&self, package: &ResolvedPackage, http_client: Agent) -> Result<()> {
         info!(
             "installing package {} version {}",
             package.name, package.version
         );
         let package_dir = self.package_path(&package.name)?;
-        let mut build = self.build_package(package, executor)?;
+        let mut build = self.build_package(package, http_client)?;
 
         for export in build.exports.iter_mut() {
             export.source_path = package_dir.join(&export.source_path);
@@ -140,11 +142,7 @@ impl InstalledPackageList {
         Ok(())
     }
 
-    fn build_package(
-        &self,
-        package: &ResolvedPackage,
-        executor: &RecipeExecutor,
-    ) -> Result<BuildResult> {
+    fn build_package(&self, package: &ResolvedPackage, http_client: Agent) -> Result<BuildResult> {
         let temp_path = self.package_path(&format!("{}.tmp", package.name))?;
 
         info!("building package {} {}", package.name, package.version);
@@ -158,7 +156,13 @@ impl InstalledPackageList {
         fs::create_dir_all(&temp_path)
             .with_context(|| format!("creating temp build dir {temp_path:?}"))?;
 
-        executor.run_build(&package.recipe, package.version.clone(), temp_path)
+        run_build(
+            &package.recipe,
+            package.version.clone(),
+            temp_path,
+            http_client,
+        )
+        .with_context(|| format!("building package {} {}", &package.name, &package.version))
     }
 
     fn add_package(&self, package_dir: &PathBuf, build: &BuildResult) -> Result<()> {

@@ -1,5 +1,5 @@
 {
     "files.associations": {
-        "*.ppmx": "python"
+        "*.ppmx": "rhai"
     }
 }

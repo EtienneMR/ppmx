@@ -2,7 +2,8 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
 use log::LevelFilter;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
+use ureq::Agent;
 
 use crate::{
     backend::Scope,
@@ -118,11 +119,12 @@ pub fn run() -> Result<()> {
     }
 }
 
-fn new_http_client() -> reqwest::blocking::Client {
+fn new_http_client() -> Agent {
     static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
-    reqwest::blocking::Client::builder()
+    Agent::config_builder()
         .user_agent(APP_USER_AGENT)
+        .timeout_global(Some(Duration::from_secs(30)))
         .build()
-        .expect("builder should be valid")
+        .into()
 }

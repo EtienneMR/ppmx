@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use log::{debug, info, warn};
+use ureq::Agent;
 
 use crate::backend::Scope;
 
@@ -77,11 +78,7 @@ impl ServerList {
         fs::remove_file(&path).with_context(|| format!("removing server at {path:?}"))
     }
 
-    pub fn find_url(
-        &self,
-        package_name: &str,
-        http_client: &reqwest::blocking::Client,
-    ) -> Result<(String, OsString)> {
+    pub fn find_url(&self, package_name: &str, http_client: &Agent) -> Result<(String, OsString)> {
         info!("finding server of {package_name}");
         let servers = self.list().context("listing configured servers")?;
 
@@ -101,24 +98,27 @@ impl ServerList {
 
             debug!("querying server {server:?} for package {package_name} at {url}");
 
-            let response = http_client
+            let found = http_client
                 .head(&url)
-                .send()
-                .with_context(|| format!("sending HEAD request to {url}"))?;
+                .call()
+                .and(Ok(true))
+                .or_else(|r| match r {
+                    ureq::Error::StatusCode(404) => Ok(false),
+                    s => Err(s),
+                })
+                .with_context(|| {
+                    format!("querying server {server:?} for package {package_name} at {url}")
+                });
 
-            let status = response.status();
-
-            if status.is_success() {
-                return Ok((url, server));
-            }
-
-            match status {
-                reqwest::StatusCode::NOT_FOUND => {
+            match found {
+                Ok(true) => return Ok((url, server)),
+                Ok(false) => {
                     debug!("server at {url} returned 404 Not Found");
                 }
-                _ => {
-                    last_error = Some(format!("{url} returned {status}"));
+                Err(e) => {
+                    last_error = Some(format!("{}", e));
                     warn!("{}", last_error.as_ref().unwrap());
+                    debug!("{:?}", e)
                 }
             }
         }

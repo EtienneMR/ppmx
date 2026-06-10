@@ -1,11 +1,12 @@
-def latest_version():
-    return "0.1.0"
+fn latest_version() {
+    "0.1.0";
+}
 
-
-def build(ctx):
+fn build(ctx) {
     ctx.write(
         "powerprofile-watch.sh",
-        """#!/usr/bin/env bash
+        `
+#!/usr/bin/env bash
 set -euo pipefail
 
 apps=(
@@ -29,7 +30,7 @@ trap cleanup EXIT INT TERM
 while true; do
     found=0
 
-    for app in "${apps[@]}"; do
+    for app in "\${apps[@]}"; do
         if pgrep -x "$app" >/dev/null; then
             found=1
             break
@@ -48,13 +49,14 @@ while true; do
 
     sleep 5
 done
-""",
-    )
-    ctx.run("chmod", "+x", "powerprofile-watch.sh")
+`,
+    );
+    ctx.run("chmod", ["+x", "powerprofile-watch.sh"]);
 
     ctx.write(
         "powerprofile-watch.service",
-        """[Unit]
+        `
+[Unit]
 Description=Switch power profile while games are running
 After=graphical-session.target
 
@@ -66,12 +68,13 @@ RestartSec=2
 
 [Install]
 WantedBy=default.target
-""",
-    )
+`,
+    );
 
-    ctx.export_root(".")
-    ctx.export_exe("powerprofile-watch.sh", "powerprofile-watch")
+    ctx.export_root(".");
+    ctx.export_exe("powerprofile-watch.sh", "powerprofile-watch");
     ctx.export_config(
         "powerprofile-watch.service",
         "systemd/user/powerprofile-watch.service"
-    )
+    );
+}

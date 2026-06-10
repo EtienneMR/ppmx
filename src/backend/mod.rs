@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use log::{debug, info};
 use std::path::PathBuf;
+use ureq::Agent;
 
 pub use installer::{InstalledPackage, InstalledPackageList};
-pub use recipe::RecipeExecutor;
+pub use recipe::{eval_latest_version, run_build};
 pub use server::ServerList;
 
 mod installer;
@@ -37,21 +38,16 @@ impl ResolvedPackage {
         }
     }
 
-    pub fn resolve(
-        name: &str,
-        recipe_url: &str,
-        http_client: &reqwest::blocking::Client,
-        recipe_executor: &RecipeExecutor,
-    ) -> Result<Self> {
+    pub fn resolve(name: &str, recipe_url: &str, http_client: Agent) -> Result<Self> {
         info!("resolving package {name} at {recipe_url}");
 
-        let source_recipe = fetch_recipe(recipe_url, http_client)
+        let source_recipe = fetch_recipe(recipe_url, &http_client)
             .with_context(|| format!("fetching recipe of {name}"))?;
-        let recipe = recipe::Recipe::from_content(recipe_url, source_recipe)
+        let recipe = recipe::Recipe::parse(source_recipe)
             .with_context(|| format!("parsing recipe of {name}"))?;
-        let version = recipe_executor.eval_latest_version(&recipe)?;
+        let version = eval_latest_version(&recipe, http_client)?;
 
-        debug!("version: {}", version);
+        debug!("package {name} version {}", version);
 
         Ok(Self::new(
             name.to_owned(),
@@ -70,14 +66,13 @@ impl ResolvedPackage {
     }
 }
 
-pub fn fetch_recipe(recipe_url: &str, http_client: &reqwest::blocking::Client) -> Result<String> {
+pub fn fetch_recipe(recipe_url: &str, http_client: &Agent) -> Result<String> {
     let source = http_client
         .get(recipe_url)
-        .send()
-        .with_context(|| format!("sending recipe request to {recipe_url}"))?
-        .error_for_status()
+        .call()
         .with_context(|| format!("fetching recipe at {recipe_url}"))?
-        .text()
+        .body_mut()
+        .read_to_string()
         .with_context(|| format!("reading recipe response body from {recipe_url}"))?;
 
     debug!("fetched recipe at {recipe_url}:\n{source}");

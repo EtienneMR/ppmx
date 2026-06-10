@@ -1,27 +1,25 @@
-REPO = "VSCodium/vscodium"
+const REPO = "VSCodium/vscodium";
 
+fn latest_version() {
+    github::latest_release(global::REPO);
+}
 
-def latest_version():
-    return github.latest_release(REPO)
-
-
-def build(ctx):
-    arch = {
+fn build(ctx) {
+    const arch = #{
         "x86_64": "x64",
         "aarch64": "arm64",
         "arm": "armhf",
-    }[ctx.arch]
-
-    asset_name = f"vscodium-reh-web-{ctx.os}-{arch}-{ctx.version}.tar.gz"
-    dist_name = "vscodium-web"
+    }[ctx.arch];
 
     ctx.download(
-        github.asset_url(REPO, ctx.version, asset_name),
-        asset_name,
-    )
-    ctx.run("mkdir", dist_name)
-    ctx.run("tar", "-xzf", asset_name, "-C", dist_name)
+        github::asset_url(global::REPO, ctx.version, `vscodium-reh-web-${ctx.os}-${arch}-${ctx.version}.tar.gz`),
+        "vscodium-web.tar.gz"
+    );
+
+    ctx.run("mkdir", ["vscodium-web"]);
+    ctx.run("tar", ["-xzf", "vscodium-web.tar.gz", "-C", "vscodium-web"]);
 
 
-    ctx.export_root(dist_name)
-    ctx.export_exe("bin/codium-server", "codium-web")
+    ctx.export_root("vscodium-web");
+    ctx.export_exe("bin/codium-server", "codium-web");
+}

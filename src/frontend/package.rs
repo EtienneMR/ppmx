@@ -1,11 +1,10 @@
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use log::{error, info};
+use ureq::Agent;
 
 use crate::{
-    backend::{
-        InstalledPackage, InstalledPackageList, RecipeExecutor, ResolvedPackage, Scope, ServerList,
-    },
+    backend::{InstalledPackage, InstalledPackageList, ResolvedPackage, Scope, ServerList},
     frontend::new_http_client,
 };
 
@@ -65,15 +64,13 @@ impl PackagesCommand {
                 let http_client = new_http_client();
                 let package_list = InstalledPackageList::new(scope.clone());
                 let server_list = ServerList::new(scope);
-                let executor = RecipeExecutor::new(http_client.clone());
 
                 for package_name in args.packages.iter() {
                     install(
                         package_name,
-                        &http_client,
+                        http_client.clone(),
                         &package_list,
                         &server_list,
-                        &executor,
                     )?;
                 }
             }
@@ -107,7 +104,6 @@ impl PackagesCommand {
             PackagesCommand::Update(args) => {
                 let http_client = new_http_client();
                 let package_list = InstalledPackageList::new(scope);
-                let executor = RecipeExecutor::new(http_client.clone());
 
                 let mut packages = package_list.list()?;
 
@@ -121,7 +117,7 @@ impl PackagesCommand {
 
                 let mut has_errors = false;
                 for install in packages.into_iter() {
-                    if let Err(e) = update(&install, &http_client, &package_list, &executor) {
+                    if let Err(e) = update(&install, http_client.clone(), &package_list) {
                         has_errors = true;
                         error!("{:?}", e);
                     }
@@ -139,39 +135,33 @@ impl PackagesCommand {
 
 fn install(
     package_name: &str,
-    http_client: &reqwest::blocking::Client,
+    http_client: Agent,
     package_list: &InstalledPackageList,
     server_list: &ServerList,
-    executor: &RecipeExecutor,
 ) -> Result<()> {
     info!("installing package {package_name}");
     let (recipe_url, _server_name) = server_list.find_url(package_name, &http_client)?;
 
-    let package = ResolvedPackage::resolve(package_name, &recipe_url, &http_client, &executor)?;
-    package_list.install(&package, &executor)?;
+    let package = ResolvedPackage::resolve(package_name, &recipe_url, http_client.clone())?;
+    package_list.install(&package, http_client)?;
 
     Ok(())
 }
 
 fn update(
     install: &InstalledPackage,
-    http_client: &reqwest::blocking::Client,
+    http_client: Agent,
     package_list: &InstalledPackageList,
-    executor: &RecipeExecutor,
 ) -> Result<()> {
-    let package = ResolvedPackage::resolve(
-        install.name(),
-        install.recipe_url(),
-        &http_client,
-        &executor,
-    )
-    .with_context(|| {
-        format!(
-            "resolving package {} at {}",
-            install.name(),
-            install.recipe_url()
-        )
-    })?;
+    let package =
+        ResolvedPackage::resolve(install.name(), install.recipe_url(), http_client.clone())
+            .with_context(|| {
+                format!(
+                    "resolving package {} at {}",
+                    install.name(),
+                    install.recipe_url()
+                )
+            })?;
 
     if package.version() != install.version() {
         info!(
@@ -180,13 +170,15 @@ fn update(
             install.version(),
             package.version()
         );
-        package_list.install(&package, &executor).with_context(|| {
-            format!(
-                "installing package {} {}",
-                package.name(),
-                package.version()
-            )
-        })?;
+        package_list
+            .install(&package, http_client)
+            .with_context(|| {
+                format!(
+                    "installing package {} {}",
+                    package.name(),
+                    package.version()
+                )
+            })?;
     } else {
         info!(
             "package {} {} is up-to-date",
