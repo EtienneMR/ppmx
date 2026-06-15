@@ -1,9 +1,14 @@
+import "std:env" as env;
+import "std:fs" as fs;
+import "std:github" as github;
+import "std:recipe" as recipe;
+
 fn latest_version() {
-    "0.1.0";
+    recipe::version("0.1.0");
 }
 
-fn build(ctx) {
-    ctx.write(
+fn build(version) {
+    fs::write(
         "powerprofile-watch.sh",
         `
 #!/usr/bin/env bash
@@ -51,9 +56,9 @@ while true; do
 done
 `,
     );
-    ctx.run("chmod", ["+x", "powerprofile-watch.sh"]);
+    fs::run("chmod", ["+x", "powerprofile-watch.sh"]);
 
-    ctx.write(
+    fs::write(
         "powerprofile-watch.service",
         `
 [Unit]
@@ -71,10 +76,7 @@ WantedBy=default.target
 `,
     );
 
-    ctx.export_root(".");
-    ctx.export_exe("powerprofile-watch.sh", "powerprofile-watch");
-    ctx.export_config(
-        "powerprofile-watch.service",
-        "systemd/user/powerprofile-watch.service"
-    );
+    recipe::build(".")
+        .with_exe("powerprofile-watch.sh", "powerprofile-watch")
+        .with_config("powerprofile-watch.service", "systemd/user/powerprofile-watch.service");
 }

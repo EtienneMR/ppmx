@@ -1,15 +1,14 @@
 use anyhow::{Context, Result};
-use log::{debug, info};
-use std::path::PathBuf;
+use log::trace;
+use std::{fmt::Display, ops::Deref, path::PathBuf};
 use ureq::Agent;
 
-pub use installer::{InstalledPackage, InstalledPackageList};
-pub use recipe::{eval_latest_version, run_build};
-pub use server::ServerList;
+use crate::backend::recipes::PackageVersion;
 
-mod installer;
-mod recipe;
-mod server;
+pub mod database;
+pub mod planner;
+pub mod recipes;
+pub mod source;
 
 // PUBLIC API
 
@@ -22,14 +21,19 @@ pub enum Scope {
 
 pub struct ResolvedPackage {
     name: String,
-    version: String,
+    version: PackageVersion,
 
     recipe_url: String,
-    recipe: recipe::Recipe,
+    recipe: recipes::Recipe,
 }
 
 impl ResolvedPackage {
-    pub fn new(name: String, version: String, recipe_url: String, recipe: recipe::Recipe) -> Self {
+    pub fn new(
+        name: String,
+        version: PackageVersion,
+        recipe_url: String,
+        recipe: recipes::Recipe,
+    ) -> Self {
         Self {
             name,
             version,
@@ -38,23 +42,39 @@ impl ResolvedPackage {
         }
     }
 
-    pub fn resolve(name: &str, recipe_url: &str, http_client: Agent) -> Result<Self> {
-        info!("resolving package {name} at {recipe_url}");
+    pub fn resolve(name: String, http_agent: Agent, scope: &Scope) -> Result<Self> {
+        trace!("resolving package {name:?}");
 
-        let source_recipe = fetch_recipe(recipe_url, &http_client)
-            .with_context(|| format!("fetching recipe of {name}"))?;
-        let recipe = recipe::Recipe::parse(source_recipe)
-            .with_context(|| format!("parsing recipe of {name}"))?;
-        let version = eval_latest_version(&recipe, http_client)?;
+        let (recipe_source, recipe_url, _) = source::get_recipe(&name, &http_agent, scope)
+            .with_context(|| format!("failed to resolve recipe url of {name}"))?;
 
-        debug!("package {name} version {}", version);
+        Self::parse(name, recipe_source, recipe_url, http_agent)
+    }
 
-        Ok(Self::new(
-            name.to_owned(),
-            version,
-            recipe_url.to_owned(),
-            recipe,
-        ))
+    pub fn fetch(name: String, recipe_url: String, http_agent: Agent) -> Result<Self> {
+        trace!("fetching package {name} at {recipe_url}");
+
+        let recipe_content = fetch_recipe(&recipe_url, &http_agent)
+            .with_context(|| format!("failed to fetch recipe of {name} at {recipe_url}"))?;
+
+        Self::parse(name, recipe_content, recipe_url, http_agent)
+    }
+
+    pub fn parse(
+        name: String,
+        recipe_content: String,
+        recipe_url: String,
+        http_agent: Agent,
+    ) -> Result<Self> {
+        let recipe = recipes::Recipe::parse(recipe_content)
+            .with_context(|| format!("failed to parse recipe of {name}"))?;
+        let version = recipe
+            .eval_latest_version(http_agent)
+            .with_context(|| format!("failed to resolve version of {name}"))?;
+
+        trace!("package {name} version {}", version.name);
+
+        Ok(Self::new(name, version, recipe_url, recipe))
     }
 
     pub fn name(&self) -> &str {
@@ -62,20 +82,59 @@ impl ResolvedPackage {
     }
 
     pub fn version(&self) -> &str {
-        &self.version
+        &self.version.name
     }
 }
 
-pub fn fetch_recipe(recipe_url: &str, http_client: &Agent) -> Result<String> {
-    let source = http_client
+impl Display for ResolvedPackage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} v{}", self.name(), self.version())
+    }
+}
+
+pub struct ResolvedPackageWithDependencies {
+    package: ResolvedPackage,
+    dependencies: Vec<String>,
+}
+
+impl TryFrom<ResolvedPackage> for ResolvedPackageWithDependencies {
+    type Error = anyhow::Error;
+    fn try_from(value: ResolvedPackage) -> Result<Self> {
+        Ok(Self {
+            dependencies: value
+                .recipe
+                .eval_dependencies()
+                .with_context(|| format!("failed to resolve dependencies of {}", value.name()))?
+                .packages,
+            package: value,
+        })
+    }
+}
+
+impl Deref for ResolvedPackageWithDependencies {
+    type Target = ResolvedPackage;
+
+    fn deref(&self) -> &Self::Target {
+        &self.package
+    }
+}
+
+impl Display for ResolvedPackageWithDependencies {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.package.fmt(f)
+    }
+}
+
+pub fn fetch_recipe(recipe_url: &str, http_agent: &Agent) -> Result<String> {
+    let source = http_agent
         .get(recipe_url)
         .call()
-        .with_context(|| format!("fetching recipe at {recipe_url}"))?
+        .with_context(|| format!("failed to fetch recipe at {recipe_url}"))?
         .body_mut()
         .read_to_string()
-        .with_context(|| format!("reading recipe response body from {recipe_url}"))?;
+        .with_context(|| format!("failed to read recipe response body from {recipe_url}"))?;
 
-    debug!("fetched recipe at {recipe_url}:\n{source}");
+    trace!("fetched recipe at {recipe_url}:\n{source}");
 
     Ok(source)
 }
@@ -107,7 +166,7 @@ impl Scope {
         }
     }
 
-    fn app_data_dir(&self) -> anyhow::Result<PathBuf> {
+    fn app_data_dir(&self) -> Result<PathBuf> {
         Ok(self.share_path()?.join("ppmx"))
     }
 }

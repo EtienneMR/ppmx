@@ -1,0 +1,25 @@
+import "std:fs" as fs;
+import "std:github" as github;
+import "std:recipe" as recipe;
+
+const REPO = "EtienneMR/sc-scripts";
+
+fn latest_version() {
+    let ref = github::repo_branch_reference(global::REPO, "main");
+    recipe::version(ref.sub_string(0, 8))
+        .with_metadata(ref);
+}
+
+fn build(version) {
+    fs::download(
+        github::tarball_url(global::REPO, version.metadata),
+        "sc.tar.gz"
+    );
+
+
+    fs::run("tar", ["--strip-components=1", "-xzf", "sc.tar.gz"]);
+    fs::run("chmod", ["+x", "sc/__main__.py"]);
+
+    recipe::build("sc")
+        .with_exe("__main__.py", "sc");
+}

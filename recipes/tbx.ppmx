@@ -1,27 +1,39 @@
+import "std:env" as env;
+import "std:fs" as fs;
+import "std:github" as github;
+import "std:recipe" as recipe;
+
 const REPO = "EtienneMR/tbx";
 
 fn latest_version() {
-    github::latest_release(global::REPO).sub_string(1);
+    let tag = github::latest_release(global::REPO);
+    recipe::version(tag.sub_string(1))
+        .with_metadata(tag);
 }
 
-fn build(ctx) {
-    ctx.download(
-        github::asset_url(global::REPO, `v${ctx.version}`, `tbx-${ctx.os}`),
+fn dependencies() {
+    recipe::dependencies()
+        .with_package("vscodium-web")
+        .with_package("cloudflared");
+}
+
+fn build(version) {
+    fs::download(
+        github::asset_url(global::REPO, version.metadata, `tbx-${env::OS}`),
         "tbx"
     );
 
-    ctx.run("chmod", ["+x", "tbx"]);
+    fs::run("chmod", ["+x", "tbx"]);
 
-    ctx.run("mkdir", ["-p", "completions"]);
-    const comp = ctx.run("./tbx", ["completion", "zsh"]);
-    ctx.write("completions/zsh", comp);
+    fs::run("mkdir", ["-p", "completions"]);
+    const comp = fs::run("./tbx", ["completion", "zsh"]);
+    fs::write("completions/zsh", comp);
 
-    const comp = ctx.run("./tbx", ["completion", "bash"]);
-    ctx.write("completions/bash", comp);
+    const comp = fs::run("./tbx", ["completion", "bash"]);
+    fs::write("completions/bash", comp);
 
-
-    ctx.export_root(".");
-    ctx.export_exe("tbx", "tbx");
-    ctx.export_share("completions/zsh", "zsh/site-functions/_tbx");
-    ctx.export_share("completions/bash", "bash-completion/completions/tbx");
+    recipe::build(".")
+        .with_exe("tbx", "tbx")
+        .with_share("completions/zsh", "zsh/site-functions/_tbx")
+        .with_share("completions/bash", "bash-completion/completions/tbx");
 }

@@ -1,23 +1,28 @@
+import "std:env" as env;
+import "std:fs" as fs;
+import "std:github" as github;
+import "std:recipe" as recipe;
+
 const REPO = "cloudflare/cloudflared";
 
 fn latest_version() {
-    github::latest_release(global::REPO);
+    recipe::version(github::latest_release(global::REPO));
 }
 
-fn build(ctx) {
-    const arch = #{
+fn build(version) {
+    const arch = env::map_arch(#{
         "x86_64": "amd64",
         "aarch64": "arm64",
         "arm": "arm",
-    }[ctx.arch];
+    });
 
-    ctx.download(
-        github::asset_url(global::REPO, ctx.version, `cloudflared-${ctx.os}-${arch}`),
+    fs::download(
+        github::asset_url(global::REPO, version.name, `cloudflared-${env::OS}-${arch}`),
         "cloudflared"
     );
 
-    ctx.run("chmod", ["+x", "cloudflared"]);
+    fs::run("chmod", ["+x", "cloudflared"]);
 
-    ctx.export_root(".");
-    ctx.export_exe("cloudflared", "cloudflared");
+    recipe::build(".")
+        .with_exe("cloudflared", "cloudflared");
 }

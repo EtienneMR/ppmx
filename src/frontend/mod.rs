@@ -2,16 +2,16 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
 use log::LevelFilter;
-use std::{path::PathBuf, time::Duration};
+use std::{env, path::PathBuf, time::Duration};
 use ureq::Agent;
 
 use crate::{
     backend::Scope,
-    frontend::{package::PackagesCommand, server::ServersCommand},
+    frontend::{package::PackagesCommand, source::SourcesCommand},
 };
 
 mod package;
-mod server;
+mod source;
 
 /// ppmx — personal package manager
 #[derive(Parser, Debug)]
@@ -69,9 +69,9 @@ enum Command {
     #[command(flatten)]
     Packages(PackagesCommand),
 
-    /// Manage package servers
+    /// Manage package sources
     #[command(subcommand)]
-    Servers(ServersCommand),
+    Sources(SourcesCommand),
 
     /// Print a shell completion script to stdout and exit
     Completions {
@@ -102,24 +102,28 @@ pub fn run() -> Result<()> {
             _ => LevelFilter::Trace,
         }
     };
-    colog::basic_builder().filter_level(level).init();
+    colog::basic_builder().filter_module("ppmx", level).init();
 
     let scope = if cli.scope.system {
         Scope::System
     } else if let Some(s) = cli.scope.scope {
-        Scope::Custom(s)
+        Scope::Custom(if s.is_absolute() {
+            s
+        } else {
+            env::current_dir()?.join(s)
+        })
     } else {
         Scope::User
     };
 
     match cli.command {
         Command::Packages(sub) => sub.run(scope),
-        Command::Servers(sub) => sub.run(scope),
+        Command::Sources(sub) => sub.run(scope),
         Command::Completions { .. } => unreachable!(),
     }
 }
 
-fn new_http_client() -> Agent {
+fn new_http_agent() -> Agent {
     static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
     Agent::config_builder()
