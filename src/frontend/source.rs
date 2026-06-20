@@ -5,7 +5,7 @@ use std::ffi::OsString;
 
 use crate::{
     backend::{Scope, source},
-    frontend::new_http_agent,
+    frontend::{new_http_agent, source_completion},
 };
 
 #[derive(Subcommand, Debug)]
@@ -34,6 +34,7 @@ pub struct SourceAddArgs {
 #[derive(Args, Debug)]
 pub struct SourceRemoveArgs {
     /// Name of the source to remove
+    #[arg(add = clap_complete::engine::ArgValueCandidates::new(source_completion))]
     name: OsString,
 }
 
@@ -58,10 +59,12 @@ impl SourcesCommand {
             }
             SourcesCommand::List => {
                 debug!("configured sources");
-                for source in source::list(&scope)?.iter() {
+                let list = source::list(&scope)?;
+                let width = list.iter().map(|p| p.len()).max().unwrap_or(0);
+                for source in list.iter() {
                     let url = source::get_url(source, &scope)?;
                     println!(
-                        "{:<10} {}{{package}}{}",
+                        "{:<width$}  {}{{package}}{}",
                         source.to_string_lossy(),
                         url.0,
                         url.1

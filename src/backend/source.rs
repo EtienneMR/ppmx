@@ -17,10 +17,14 @@ pub fn list(scope: &Scope) -> Result<Vec<OsString>> {
 
     let context = || format!("failed to list sources in {:?}", &sources_dir);
 
-    fs::read_dir(&sources_dir)
+    let mut list = fs::read_dir(&sources_dir)
         .with_context(context)?
         .map(|entry| -> Result<OsString> { Ok(entry.with_context(context)?.file_name()) })
-        .collect()
+        .collect::<Result<Vec<OsString>>>()?;
+
+    list.sort();
+
+    Ok(list)
 }
 
 pub fn get_url(name: &OsStr, scope: &Scope) -> Result<(String, String)> {

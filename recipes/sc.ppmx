@@ -6,13 +6,12 @@ const REPO = "EtienneMR/sc-scripts";
 
 fn latest_version() {
     let ref = github::repo_branch_reference(global::REPO, "main");
-    recipe::version(ref.sub_string(0, 8))
-        .with_metadata(ref);
+    recipe::version(ref);
 }
 
 fn build(version) {
     fs::download(
-        github::tarball_url(global::REPO, version.metadata),
+        github::tarball_url(global::REPO, version.name),
         "sc.tar.gz"
     );
 

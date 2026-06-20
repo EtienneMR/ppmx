@@ -1,21 +1,27 @@
+use std::{ffi::OsString, path::PathBuf};
+
 use anyhow::{Context, Result, bail};
-use clap::{Args, Subcommand};
+use clap::{ArgGroup, Args, Subcommand, ValueHint};
 use log::{info, warn};
 use ureq::Agent;
 
 use crate::{
     backend::{
-        Scope,
+        ResolvedPackage, Scope,
         database::{Database, InstallRequest, InstalledPackageData, LockedDatabase},
         planner::{InstallPlan, plan_uninstall},
+        source,
     },
-    frontend::new_http_agent,
+    frontend::{new_http_agent, source_completion},
 };
 
 #[derive(Subcommand, Debug)]
 pub enum PackagesCommand {
     /// Install one or more packages
     Install(PackageInstallArgs),
+
+    /// Import a package
+    Import(PackageImportArgs),
 
     /// Uninstall one or more packages and remove unneeded ones
     Uninstall(PackageUninstallArgs),
@@ -46,6 +52,29 @@ pub struct PackageInstallArgs {
     /// Compute install plan without running it
     #[arg(long = "dry-run")]
     dry_run: bool,
+}
+
+#[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("recipe_url")
+        .required(true)
+        .args(["source", "url"])
+))]
+pub struct PackageImportArgs {
+    // Name of the imported package
+    name: String,
+
+    /// Source to fetch the url from
+    #[arg(long, add = clap_complete::engine::ArgValueCandidates::new(source_completion))]
+    source: Option<OsString>,
+
+    /// URL of the recipe
+    #[arg(long)]
+    url: Option<String>,
+
+    /// Recipe file to use, downloaded from recipe url by default
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -83,7 +112,7 @@ pub struct PackageSelection {
     packages: Vec<String>,
 
     /// Select all packages
-    #[arg(short = 'a', long = "all")]
+    #[arg(short, long)]
     all: bool,
 }
 
@@ -137,11 +166,39 @@ impl PackagesCommand {
                 let plan = plan.to_plan();
 
                 for package_name in to_mark_explicit.into_iter() {
-                    info!("marking package {package_name} as explicitly installed");
                     database.set_install_reason(&package_name, true)?;
                 }
 
                 apply_plan(plan, &http_agent, &scope, &mut database)?;
+            }
+            PackagesCommand::Import(args) => {
+                let recipe_url = if let Some(url) = args.url {
+                    url
+                } else {
+                    let source_name = args.source.expect("required arg");
+                    let (mut prefix, suffix) =
+                        source::get_url(&source_name, &scope).with_context(|| {
+                            format!("failled to get source url of imported {source_name:?}")
+                        })?;
+                    prefix.push_str(&args.name);
+                    prefix.push_str(&suffix);
+                    prefix
+                };
+
+                let http_agent = new_http_agent();
+                let package = if let Some(recipe) = args.file {
+                    let content = std::fs::read_to_string(&recipe).with_context(|| {
+                        format!("failled to read imported recipe at {recipe:?}")
+                    })?;
+                    ResolvedPackage::parse(args.name, content, recipe_url, http_agent.clone())?
+                } else {
+                    ResolvedPackage::fetch(args.name, recipe_url, http_agent.clone())?
+                };
+
+                let mut database = LockedDatabase::load(&scope)?;
+                let mut plan = InstallPlan::new(&scope, &database, &http_agent);
+                plan.add_import(package)?;
+                apply_plan(plan.to_plan(), &http_agent, &scope, &mut database)?;
             }
             PackagesCommand::Uninstall(args) => {
                 let mut database = LockedDatabase::load(&scope)?;
@@ -161,13 +218,14 @@ impl PackagesCommand {
                 }
             }
             PackagesCommand::List => {
-                info!("installed packages");
-
                 let database = Database::load(&scope)?;
                 let width = database.keys().map(|p| p.len()).max().unwrap_or(0);
+                if database.is_empty() {
+                    warn!("no package installed");
+                }
                 for (name, data) in database.iter() {
                     println!(
-                        "  {name:width$}  {}  {}",
+                        "{name:width$}  {}  {}",
                         if data.explicitly_installed() {
                             " "
                         } else {

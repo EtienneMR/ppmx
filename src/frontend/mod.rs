@@ -1,12 +1,12 @@
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
-use clap_complete::Shell;
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::{CompleteEnv, CompletionCandidate};
 use log::LevelFilter;
 use std::{env, path::PathBuf, time::Duration};
 use ureq::Agent;
 
 use crate::{
-    backend::Scope,
+    backend::{self, Scope},
     frontend::{package::PackagesCommand, source::SourcesCommand},
 };
 
@@ -72,26 +72,12 @@ enum Command {
     /// Manage package sources
     #[command(subcommand)]
     Sources(SourcesCommand),
-
-    /// Print a shell completion script to stdout and exit
-    Completions {
-        /// Target shell
-        shell: Shell,
-    },
 }
 
 pub fn run() -> Result<()> {
-    let cli = Cli::parse();
+    CompleteEnv::with_factory(Cli::command).complete();
 
-    if let Command::Completions { shell } = cli.command {
-        clap_complete::generate(
-            shell,
-            &mut <Cli as clap::CommandFactory>::command(),
-            "ppmx",
-            &mut std::io::stdout(),
-        );
-        return Ok(());
-    }
+    let cli = Cli::parse();
 
     let level = if cli.verbosity.quiet {
         LevelFilter::Warn
@@ -119,7 +105,6 @@ pub fn run() -> Result<()> {
     match cli.command {
         Command::Packages(sub) => sub.run(scope),
         Command::Sources(sub) => sub.run(scope),
-        Command::Completions { .. } => unreachable!(),
     }
 }
 
@@ -131,4 +116,23 @@ fn new_http_agent() -> Agent {
         .timeout_global(Some(Duration::from_secs(30)))
         .build()
         .into()
+}
+
+fn source_completion() -> Vec<CompletionCandidate> {
+    let mut completions = Vec::new();
+
+    if let Ok(mut sources) = backend::source::list(&Scope::User) {
+        sources.sort();
+        for source in sources.into_iter() {
+            completions.push(CompletionCandidate::new(source).help(Some("(user)".into())));
+        }
+    }
+    if let Ok(mut sources) = backend::source::list(&Scope::System) {
+        sources.sort();
+        for source in sources.into_iter() {
+            completions.push(CompletionCandidate::new(source).help(Some("(system)".into())));
+        }
+    }
+
+    completions
 }

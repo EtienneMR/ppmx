@@ -203,7 +203,7 @@ mod fs {
     };
 
     use anyhow::{Context, anyhow};
-    use rhai::Array;
+    use rhai::{Array, Map};
 
     #[rhai_fn(volatile, return_raw)]
     pub fn download(
@@ -248,6 +248,16 @@ mod fs {
         program: String,
         args: Array,
     ) -> Result<String, Box<EvalAltResult>> {
+        run_opts(ctx, program, args, Map::new())
+    }
+
+    #[rhai_fn(volatile, return_raw, name = "run")]
+    pub fn run_opts(
+        ctx: NativeCallContext,
+        program: String,
+        args: Array,
+        opts: Map,
+    ) -> Result<String, Box<EvalAltResult>> {
         let runtime = Runtime::from_tag(ctx.tag());
         let working_directory = runtime.working_directory()?;
 
@@ -260,10 +270,20 @@ mod fs {
             .collect::<Result<Vec<_>, _>>()
             .map_err(to_runtime_error)?;
 
+        let mut command = Command::new(&program);
+        command.args(&string_args).current_dir(working_directory);
+
+        if let Some(env) = opts
+            .get("env")
+            .and_then(|env| env.flatten_clone().try_cast::<Map>())
+        {
+            for (key, val) in env.into_iter() {
+                command.env(key.as_str(), val.to_string());
+            }
+        }
+
         trace!("running command: {program} {string_args:?}");
-        let output = Command::new(&program)
-            .args(&string_args)
-            .current_dir(working_directory)
+        let output = command
             .output()
             .with_context(|| format!("failed to spawn command {program}"))
             .map_err(to_runtime_error)?;

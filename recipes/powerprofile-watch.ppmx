@@ -1,6 +1,4 @@
-import "std:env" as env;
 import "std:fs" as fs;
-import "std:github" as github;
 import "std:recipe" as recipe;
 
 fn latest_version() {

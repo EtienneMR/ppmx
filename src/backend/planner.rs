@@ -39,7 +39,7 @@ impl<'a> InstallPlan<'a> {
             trace!("marking {package_name} as explicitly requested");
             self.plan[*idx].install_explicitly = true;
         } else {
-            trace!("failed to plan install request for {package_name}");
+            trace!("planning install request for {package_name}");
             self.add(
                 MaybeResolvedPackage::NameOnly(package_name),
                 true,
@@ -47,6 +47,15 @@ impl<'a> InstallPlan<'a> {
             )
             .context("failed to resolve install request")?;
         }
+
+        Ok(())
+    }
+
+    pub fn add_import(&mut self, package: ResolvedPackage) -> Result<()> {
+        debug!("add_import request: {package}");
+
+        self.add(MaybeResolvedPackage::Resolved(package), true, true)
+            .context("failed to resolve import request")?;
 
         Ok(())
     }

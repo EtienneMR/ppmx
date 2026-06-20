@@ -1,0 +1,30 @@
+import "std:env" as env;
+import "std:fs" as fs;
+import "std:github" as github;
+import "std:recipe" as recipe;
+
+const REPO = "EtienneMR/ppmx";
+
+fn latest_version() {
+    let tag = github::latest_release(global::REPO);
+    recipe::version(tag.sub_string(1))
+        .with_metadata(tag);
+}
+
+fn build(version) {
+    fs::download(
+        github::asset_url(global::REPO, version.metadata, `ppmx-${env::OS}`),
+        "ppmx"
+    );
+
+    fs::run("chmod", ["+x", "ppmx"]);
+
+    fs::run("mkdir", ["-p", "completions"]);
+    fs::write("completions/zsh", `eval "$(COMPLETE=zsh ppmx)"\n`);
+    fs::write("completions/bash", `eval "$(COMPLETE=bash ppmx)"\n`);
+
+    recipe::build(".")
+        .with_exe("ppmx", "ppmx")
+        .with_share("completions/zsh", "zsh/site-functions/_ppmx")
+        .with_share("completions/bash", "bash-completion/completions/ppmx");
+}

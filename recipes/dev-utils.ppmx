@@ -1,0 +1,16 @@
+import "std:recipe" as recipe;
+
+fn latest_version() {
+    recipe::version("0.1.0");
+}
+
+fn dependencies() {
+    recipe::dependencies()
+        .with_package("ppmx")
+        .with_package("sc")
+        .with_package("tbx");
+}
+
+fn build(version) {
+    recipe::build(".");
+}
