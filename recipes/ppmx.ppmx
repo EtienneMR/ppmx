@@ -20,8 +20,8 @@ fn build(version) {
     fs::run("chmod", ["+x", "ppmx"]);
 
     fs::run("mkdir", ["-p", "completions"]);
-    fs::write("completions/zsh", `eval "$(COMPLETE=zsh ppmx)"\n`);
-    fs::write("completions/bash", `eval "$(COMPLETE=bash ppmx)"\n`);
+    fs::write("completions/zsh", "eval \"$(COMPLETE=zsh ppmx)\"\n");
+    fs::write("completions/bash", "eval \"$(COMPLETE=bash ppmx)\"\n");
 
     recipe::build(".")
         .with_exe("ppmx", "ppmx")

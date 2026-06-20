@@ -121,14 +121,12 @@ fn new_http_agent() -> Agent {
 fn source_completion() -> Vec<CompletionCandidate> {
     let mut completions = Vec::new();
 
-    if let Ok(mut sources) = backend::source::list(&Scope::User) {
-        sources.sort();
+    if let Ok(sources) = backend::source::list(&Scope::User) {
         for source in sources.into_iter() {
             completions.push(CompletionCandidate::new(source).help(Some("(user)".into())));
         }
     }
-    if let Ok(mut sources) = backend::source::list(&Scope::System) {
-        sources.sort();
+    if let Ok(sources) = backend::source::list(&Scope::System) {
         for source in sources.into_iter() {
             completions.push(CompletionCandidate::new(source).help(Some("(system)".into())));
         }
