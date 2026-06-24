@@ -3,17 +3,15 @@ import "std:fs" as fs;
 import "std:github" as github;
 import "std:recipe" as recipe;
 
-const REPO = "EtienneMR/ppmx";
-
 fn latest_version() {
-    let tag = github::latest_release(global::REPO);
-    recipe::version(tag.sub_string(1))
-        .with_metadata(tag);
+    let release = github::latest_release("EtienneMR/ppmx");
+    recipe::version(release.tag_name.sub_string(1))
+        .with_metadata(release);
 }
 
 fn build(version) {
     fs::download(
-        github::asset_url(global::REPO, version.metadata, `ppmx-${env::OS}`),
+        version.metadata.asset(`ppmx-${env::OS}-${env::ARCH}`).url,
         "ppmx"
     );
 

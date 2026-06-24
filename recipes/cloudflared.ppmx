@@ -3,10 +3,10 @@ import "std:fs" as fs;
 import "std:github" as github;
 import "std:recipe" as recipe;
 
-const REPO = "cloudflare/cloudflared";
-
 fn latest_version() {
-    recipe::version(github::latest_release(global::REPO));
+    let release = github::latest_release("cloudflare/cloudflared");
+    recipe::version(release.tag_name)
+        .with_metadata(release);
 }
 
 fn build(version) {
@@ -17,7 +17,7 @@ fn build(version) {
     });
 
     fs::download(
-        github::asset_url(global::REPO, version.name, `cloudflared-${env::OS}-${arch}`),
+        version.metadata.asset(`cloudflared-${env::OS}-${arch}`).url,
         "cloudflared"
     );
 

@@ -219,6 +219,7 @@ mod fs {
 
         let mut response = http_agent
             .get(url)
+            .header("Accept", "application/octet-stream") // needed for github api downloads, could be changed with a new download_opts variant
             .call()
             .with_context(|| format!("failed to send download request for {url}"))
             .map_err(to_runtime_error)?;
@@ -324,32 +325,32 @@ mod fs {
 #[export_module]
 mod github {
     use anyhow::Context;
+    use rhai::Map;
     use serde::Deserialize;
 
     #[rhai_fn(volatile, return_raw)]
-    pub fn latest_release(
-        ctx: NativeCallContext,
-        repo: &str,
-    ) -> Result<String, Box<EvalAltResult>> {
+    pub fn latest_release(ctx: NativeCallContext, repo: &str) -> Result<Map, Box<EvalAltResult>> {
         trace!("fetching latest release for {repo}");
 
         let runtime = Runtime::from_tag(ctx.tag());
         runtime.ensure_idempotence_not_required()?;
         let http_agent = runtime.http_agent()?;
 
-        #[derive(Deserialize)]
-        struct Release {
-            tag_name: String,
-        }
         let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-        let release: Release = http_agent
+        let release = http_agent
             .get(&url)
             .call()
-            .and_then(|mut r| r.body_mut().read_json())
+            .and_then(|mut r| r.body_mut().read_to_string())
             .with_context(|| format!("failed to fetch latest release of {repo} at {url}"))
             .map_err(to_runtime_error)?;
-        trace!("latest release for {repo} is {}", release.tag_name);
-        Ok(release.tag_name)
+
+        let dynamic = ctx.engine().parse_json(&release, true)?;
+
+        trace!(
+            "latest release for {repo} is {}",
+            dynamic.get("tag_name").expect("github api spec")
+        );
+        Ok(dynamic)
     }
 
     #[rhai_fn(volatile, return_raw)]
@@ -386,8 +387,56 @@ mod github {
         Ok(fetched_repo.object.sha)
     }
 
-    pub fn asset_url(repo: &str, tag: &str, asset_name: &str) -> String {
-        format!("https://github.com/{repo}/releases/download/{tag}/{asset_name}")
+    #[rhai_fn(pure, return_raw, global)]
+    pub fn asset(release: &mut Map, asset_name: &str) -> Result<Map, Box<EvalAltResult>> {
+        let assets_dyn = match release.get("assets") {
+            Some(a) => a,
+            None => return Err("invalid relase: missing assets field".into()),
+        };
+
+        let assets = match assets_dyn.as_array_ref() {
+            Ok(a) => a,
+            Err(t) => {
+                return Err(format!(
+                    "invalid release: expected assets field to be an array, got a {t}"
+                )
+                .into());
+            }
+        };
+
+        for asset_dyn in assets.iter() {
+            let asset = match asset_dyn.read_lock::<Map>() {
+                Some(a) => a,
+                None => {
+                    return Err(format!(
+                        "invalid release: expected assets to be maps, got a {}",
+                        asset_dyn.type_name()
+                    )
+                    .into());
+                }
+            };
+
+            let name_dyn = match asset.get("name") {
+                Some(a) => a,
+                None => return Err("invalid relase: missing asset name field".into()),
+            };
+
+            let name = match name_dyn.as_immutable_string_ref() {
+                Ok(n) => n,
+                Err(t) => {
+                    return Err(format!(
+                        "invalid release: expected asset name fields to be strings, got a {t}"
+                    )
+                    .into());
+                }
+            };
+
+            if asset_name == *name {
+                return Ok(asset.clone());
+            }
+        }
+
+        Err("asset not found".into())
     }
 
     pub fn tarball_url(repo: &str, reference: &str) -> String {
