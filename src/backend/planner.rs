@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    ffi::OsString,
+};
 
 use anyhow::{Context, Result, bail};
 use log::{debug, info, trace};
@@ -7,6 +10,7 @@ use ureq::Agent;
 use crate::backend::{
     ResolvedPackage, ResolvedPackageWithDependencies, Scope,
     database::{Database, InstallRequest},
+    source::Source,
 };
 
 pub struct InstallPlan<'a> {
@@ -64,15 +68,20 @@ impl<'a> InstallPlan<'a> {
         &mut self,
         package_name: String,
         current_version: &str,
-        recipe_url: String,
+        recipe_source_name: OsString,
+        recipe_source: &Source,
         explicit: bool,
     ) -> Result<()> {
         debug!(
-            "add_update request: {:?} (current: v{}, url: {:?})",
-            package_name, current_version, recipe_url
+            "add_update request: {package_name:?} (current: v{current_version}, source: {recipe_source})"
         );
 
-        let package = ResolvedPackage::fetch(package_name, recipe_url, self.http_agent.clone())?;
+        let package = ResolvedPackage::fetch(
+            package_name,
+            recipe_source_name,
+            recipe_source,
+            self.http_agent.clone(),
+        )?;
 
         let new_version = package.version();
 

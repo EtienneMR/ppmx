@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
+    ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
     ops::Deref,
@@ -28,7 +29,7 @@ pub struct InstalledPackageData {
     version: String,
     dependencies: Vec<String>,
 
-    recipe_url: String,
+    recipe_source: OsString,
     owned_files: Vec<PathBuf>,
     explicitly_installed: bool,
 }
@@ -42,8 +43,8 @@ impl InstalledPackageData {
         &self.dependencies
     }
 
-    pub fn recipe_url(&self) -> &str {
-        &self.recipe_url
+    pub fn recipe_source(&self) -> &OsStr {
+        &self.recipe_source
     }
 
     pub fn owned_files(&self) -> &[PathBuf] {
@@ -218,7 +219,7 @@ impl LockedDatabase {
 
         let new_install = InstalledPackageData {
             version: package.version.name,
-            recipe_url: package.recipe_url,
+            recipe_source: package.recipe_source,
             owned_files: build
                 .exports
                 .iter()

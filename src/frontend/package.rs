@@ -1,7 +1,7 @@
 use std::{ffi::OsString, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clap::{ArgGroup, Args, Subcommand, ValueHint};
+use clap::{Args, Subcommand, ValueHint};
 use log::{info, warn};
 use ureq::Agent;
 
@@ -55,24 +55,15 @@ pub struct PackageInstallArgs {
 }
 
 #[derive(Args, Debug)]
-#[command(group(
-    ArgGroup::new("recipe_url")
-        .required(true)
-        .args(["source", "url"])
-))]
 pub struct PackageImportArgs {
     // Name of the imported package
     name: String,
 
     /// Source to fetch the url from
-    #[arg(long, add = clap_complete::engine::ArgValueCandidates::new(source_completion))]
-    source: Option<OsString>,
+    #[arg(add = clap_complete::engine::ArgValueCandidates::new(source_completion))]
+    source: OsString,
 
-    /// URL of the recipe
-    #[arg(long)]
-    url: Option<String>,
-
-    /// Recipe file to use, downloaded from recipe url by default
+    /// Recipe file to use, downloaded from source by default
     #[arg(long, value_hint = ValueHint::FilePath)]
     file: Option<PathBuf>,
 }
@@ -172,27 +163,23 @@ impl PackagesCommand {
                 apply_plan(plan, &http_agent, &scope, &mut database)?;
             }
             PackagesCommand::Import(args) => {
-                let recipe_url = if let Some(url) = args.url {
-                    url
-                } else {
-                    let source_name = args.source.expect("required arg");
-                    let (mut prefix, suffix) =
-                        source::get_url(&source_name, &scope).with_context(|| {
-                            format!("failled to get source url of imported {source_name:?}")
-                        })?;
-                    prefix.push_str(&args.name);
-                    prefix.push_str(&suffix);
-                    prefix
-                };
-
                 let http_agent = new_http_agent();
+
                 let package = if let Some(recipe) = args.file {
                     let content = std::fs::read_to_string(&recipe).with_context(|| {
                         format!("failled to read imported recipe at {recipe:?}")
                     })?;
-                    ResolvedPackage::parse(args.name, content, recipe_url, http_agent.clone())?
+
+                    ResolvedPackage::parse(args.name, content, args.source, http_agent.clone())?
                 } else {
-                    ResolvedPackage::fetch(args.name, recipe_url, http_agent.clone())?
+                    let recipe_source = source::get(&args.source, &scope)?;
+
+                    ResolvedPackage::fetch(
+                        args.name,
+                        args.source,
+                        &recipe_source,
+                        http_agent.clone(),
+                    )?
                 };
 
                 let mut database = LockedDatabase::load(&scope)?;
@@ -219,19 +206,25 @@ impl PackagesCommand {
             }
             PackagesCommand::List => {
                 let database = Database::load(&scope)?;
-                let width = database.keys().map(|p| p.len()).max().unwrap_or(0);
+                let name_width = database.keys().map(|p| p.len()).max().unwrap_or(0);
+                let version_width = database
+                    .values()
+                    .map(|p| p.version().len())
+                    .max()
+                    .unwrap_or(0);
                 if database.is_empty() {
                     warn!("no package installed");
                 }
                 for (name, data) in database.iter() {
                     println!(
-                        "{name:width$}  {}  {}",
+                        "{name:name_width$}  {}  {:version_width$}  {}",
                         if data.explicitly_installed() {
                             " "
                         } else {
                             "D"
                         },
-                        data.version()
+                        data.version(),
+                        data.recipe_source().display()
                     );
                 }
             }
@@ -247,7 +240,7 @@ impl PackagesCommand {
                             "dependency"
                         }
                     );
-                    println!("recipe url      {}", data.recipe_url());
+                    println!("recipe source   {}", data.recipe_source().display());
                     println!("exports");
                     for file in data.owned_files().iter() {
                         println!("  {}", file.display());
@@ -273,10 +266,15 @@ impl PackagesCommand {
 
                 for (package_name, package_data) in packages.into_iter() {
                     info!("planning update of {package_name}");
+
+                    let source_name = package_data.recipe_source();
+                    let source = source::get(source_name, &scope)?;
+
                     plan.add_update(
                         package_name.clone(),
                         package_data.version(),
-                        package_data.recipe_url().to_string(),
+                        source_name.to_owned(),
+                        &source,
                         package_data.explicitly_installed(),
                     )?;
                 }

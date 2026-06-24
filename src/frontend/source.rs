@@ -1,10 +1,13 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{Args, Subcommand};
 use log::debug;
 use std::ffi::OsString;
 
 use crate::{
-    backend::{Scope, source},
+    backend::{
+        Scope,
+        source::{self, Source},
+    },
     frontend::{new_http_agent, source_completion},
 };
 
@@ -48,11 +51,9 @@ impl SourcesCommand {
     pub fn run(self, scope: Scope) -> Result<()> {
         match self {
             SourcesCommand::Add(args) => {
-                let Some((prefix, suffix)) = args.url.split_once("{package}") else {
-                    bail!("invalid source url: missing {{package}} template");
-                };
-
-                source::add(&args.name, (prefix, suffix), &scope)?;
+                let source = Source::new(args.url);
+                source.validate()?;
+                source::set(&args.name, source, &scope)?;
             }
             SourcesCommand::Remove(args) => {
                 source::remove(&args.name, &scope)?;
@@ -61,14 +62,9 @@ impl SourcesCommand {
                 debug!("configured sources");
                 let list = source::list(&scope)?;
                 let width = list.iter().map(|p| p.len()).max().unwrap_or(0);
-                for source in list.iter() {
-                    let url = source::get_url(source, &scope)?;
-                    println!(
-                        "{:<width$}  {}{{package}}{}",
-                        source.to_string_lossy(),
-                        url.0,
-                        url.1
-                    )
+                for source_name in list.iter() {
+                    let source = source::get(source_name, &scope)?;
+                    println!("{:<width$}  {source}", source_name.display());
                 }
             }
             SourcesCommand::Find(args) => {

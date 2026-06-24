@@ -1,15 +1,61 @@
 use std::{
+    collections::BTreeMap,
     ffi::{OsStr, OsString},
     fs,
-    io::{BufRead, BufReader},
     path::PathBuf,
 };
 
 use anyhow::{Context, Result, bail};
 use log::{debug, trace, warn};
+use serde::{Deserialize, Serialize};
 use ureq::Agent;
 
 use crate::backend::Scope;
+
+#[derive(Serialize, Deserialize)]
+pub struct Source {
+    url: String,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+}
+
+impl Source {
+    pub fn new(url: String) -> Self {
+        Self {
+            url,
+            headers: BTreeMap::new(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.url_of("<dummy package>")
+            .with_context(|| format!("failed to validate Source"))?;
+        Ok(())
+    }
+
+    pub fn url_of(&self, package_name: &str) -> Result<String> {
+        const TEMPLATE: &str = "{package}";
+        let Some((prefix, suffix)) = self.url.split_once(TEMPLATE) else {
+            bail!(
+                "failed to get url of {package_name}: missing {TEMPLATE} template un url {:?}",
+                self.url
+            );
+        };
+
+        let mut result = String::with_capacity(prefix.len() + package_name.len() + suffix.len());
+        result.push_str(prefix);
+        result.push_str(package_name);
+        result.push_str(suffix);
+
+        Ok(result)
+    }
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.url)
+    }
+}
 
 pub fn list(scope: &Scope) -> Result<Vec<OsString>> {
     let sources_dir = sources_path(scope)?;
@@ -27,43 +73,29 @@ pub fn list(scope: &Scope) -> Result<Vec<OsString>> {
     Ok(list)
 }
 
-pub fn get_url(name: &OsStr, scope: &Scope) -> Result<(String, String)> {
-    trace!("reading source url of {name:?}");
+pub fn get(name: &OsStr, scope: &Scope) -> Result<Source> {
+    trace!("reading source of {name:?}");
 
     let path = sources_path(scope)?.join(name);
 
-    let context = || format!("failed to read source url at {path:?}");
+    let contents =
+        fs::read_to_string(&path).with_context(|| format!("failed to read source at {path:?}"))?;
 
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .open(&path)
-        .with_context(context)?;
-    let mut reader = BufReader::new(file);
-
-    let mut prefix = String::new();
-    reader.read_line(&mut prefix).with_context(context)?;
-    prefix.truncate(prefix.trim_end().len());
-
-    let mut suffix = String::new();
-    reader.read_line(&mut suffix).with_context(context)?;
-    suffix.truncate(suffix.trim_end().len());
-
-    trace!("source {name:?} is {prefix}{{}}{suffix}");
-
-    Ok((prefix, suffix))
+    serde_json::from_str(&contents).with_context(|| format!("parsing source at {path:?}"))
 }
 
-pub fn add(name: &OsStr, url: (&str, &str), scope: &Scope) -> Result<()> {
+pub fn set(name: &OsStr, source: Source, scope: &Scope) -> Result<()> {
     debug!("updating source url of {}", name.to_string_lossy());
 
     let sources_path = sources_path(scope)?;
     let path = sources_path.join(name);
 
+    let contents = serde_json::to_string_pretty(&source)?;
+
     fs::create_dir_all(sources_path)
         .with_context(|| format!("failed to create parent directories of {path:?}"))?;
 
-    fs::write(&path, format!("{}\n{}\n", url.0, url.1))
-        .with_context(|| format!("failed to update source url at {path:?}"))
+    fs::write(&path, contents).with_context(|| format!("failed to update source url at {path:?}"))
 }
 
 pub fn remove(name: &OsStr, scope: &Scope) -> Result<()> {
@@ -71,6 +103,42 @@ pub fn remove(name: &OsStr, scope: &Scope) -> Result<()> {
 
     let path = sources_path(scope)?.join(name);
     fs::remove_file(&path).with_context(|| format!("failed to remove source at {path:?}"))
+}
+
+pub fn fetch_recipe_at(
+    package_name: &str,
+    source: &Source,
+    http_agent: &Agent,
+) -> Result<Option<(String, String)>> {
+    let url = source
+        .url_of(package_name)
+        .with_context(|| format!("failed to build URL for source {source}"))?;
+
+    let mut request = http_agent.get(&url);
+    for (header, value) in source.headers.iter() {
+        request = request.header(header, value);
+    }
+
+    match request.call() {
+        Ok(mut r) => {
+            let body = r
+                .body_mut()
+                .read_to_string()
+                .with_context(|| format!("failed to read recipe of {package_name} at {url}"))?;
+
+            trace!("fetched recipe of {package_name} at {url}:\n{body}");
+
+            Ok(Some((body, url)))
+        }
+        Err(ureq::Error::StatusCode(404)) => {
+            trace!("fetched recipe of {package_name} at {url}: not found");
+
+            Ok(None)
+        }
+        Err(e) => Err(e).context(format!(
+            "failed to query source {source} for package {package_name:?} at {url}"
+        )),
+    }
 }
 
 pub fn get_recipe(
@@ -85,37 +153,17 @@ pub fn get_recipe(
         bail!("no sources configured");
     }
 
-    for source in sources.into_iter() {
-        let (mut url, suffix) = get_url(&source, scope)
-            .with_context(|| format!("failed to build URL for source {source:?}"))?;
+    for source_name in sources.into_iter() {
+        let source = get(&source_name, scope).with_context(|| {
+            format!("failed to read source of {source_name:?} at {source_name:?}")
+        })?;
 
-        url.push_str(package_name);
-        url.push_str(&suffix);
-
-        trace!("querying source {source:?} for package {package_name} at {url}");
-
-        let response = http_agent.get(&url).call();
-
-        let result: Result<Option<String>> = match response {
-            Ok(mut r) => r
-                .body_mut()
-                .read_to_string()
-                .with_context(|| format!("failed to read recipe of {package_name} at {url}"))
-                .map(Some),
-            Err(ureq::Error::StatusCode(404)) => Ok(None),
-            Err(e) => Err(e).context(format!(
-                "failed to query source {source:?} for package {package_name} at {url}"
-            )),
-        };
-
-        match result {
-            Ok(Some(recipe)) => return Ok((recipe, url, source)),
-            Ok(None) => {
-                trace!("source at {url} returned 404 Not Found");
-            }
-            Err(e) => {
-                warn!("{:?}", e)
-            }
+        match fetch_recipe_at(package_name, &source, http_agent).with_context(|| {
+            format!("failled to fetch recipe of {package_name} at {source_name:?}")
+        }) {
+            Ok(Some((recipe, url))) => return Ok((recipe, url, source_name)),
+            Ok(None) => trace!("package {package_name} was not found at {source_name:?}"),
+            Err(e) => warn!("{:?}", e),
         }
     }
 
