@@ -17,7 +17,7 @@ fn build(version) {
     });
 
     fs::download(
-        version.metadata.asset(`cloudflared-${env::OS}-${arch}`).url,
+        version.metadata.asset_url(`cloudflared-${env::OS}-${arch}`),
         "cloudflared"
     );
 

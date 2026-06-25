@@ -17,7 +17,7 @@ fn build(version) {
     });
 
     fs::download(
-        version.metadata.asset(`vscodium-reh-web-${env::OS}-${arch}-${version.name}.tar.gz`).url,
+        version.metadata.asset_url(`vscodium-reh-web-${env::OS}-${arch}-${version.name}.tar.gz`),
         "vscodium-web.tar.gz"
     );
 

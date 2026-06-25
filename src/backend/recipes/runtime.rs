@@ -1,12 +1,16 @@
 use std::{path::PathBuf, rc::Rc};
 
+use anyhow::{Context, Result};
 use log::{debug, info, trace};
 use rhai::{
     module_resolvers::StaticModuleResolver,
     packages::{Package, StandardPackage},
     plugin::*,
 };
-use ureq::Agent;
+use ureq::{
+    Agent,
+    http::{Request, request},
+};
 
 pub struct Runtime {
     http_agent: Option<Agent>,
@@ -43,7 +47,6 @@ impl Runtime {
         resolver.insert("std:env", env::rhai_module_generate());
         resolver.insert("std:fs", fs::rhai_module_generate());
         resolver.insert("std:github", github::rhai_module_generate());
-        resolver.insert("std:http", http::rhai_module_generate());
         engine.set_module_resolver(resolver);
 
         engine
@@ -82,6 +85,42 @@ impl Runtime {
         } else {
             Ok(())
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct HttpRequest {
+    method: String,
+    url: String,
+    headers: Vec<(String, String)>,
+}
+
+impl HttpRequest {
+    pub fn new(method: String, url: String) -> Self {
+        Self {
+            method,
+            url,
+            headers: Vec::new(),
+        }
+    }
+
+    pub fn add_header(&mut self, key: String, value: String) {
+        self.headers.push((key, value));
+    }
+
+    pub fn request(self) -> Result<Request<()>> {
+        let mut request = request::Builder::new()
+            .method(self.method.as_str())
+            .uri(&self.url);
+        for (key, value) in self.headers {
+            request = request.header(key, value);
+        }
+        request.body(()).with_context(|| {
+            format!(
+                "failled to construct {} request to {}",
+                self.method, self.url
+            )
+        })
     }
 }
 
@@ -208,20 +247,23 @@ mod fs {
     #[rhai_fn(volatile, return_raw)]
     pub fn download(
         ctx: NativeCallContext,
-        url: &str,
+        request: HttpRequest,
         destination: &str,
     ) -> Result<(), Box<EvalAltResult>> {
-        trace!("downloading {url} -> {destination}");
+        trace!("downloading {} -> {destination}", &request.url);
 
         let runtime = Runtime::from_tag(ctx.tag());
         let working_directory = runtime.working_directory()?;
         let http_agent = runtime.http_agent()?;
 
+        let request = request
+            .request()
+            .context("failed to build download request")
+            .map_err(to_runtime_error)?;
+
         let mut response = http_agent
-            .get(url)
-            .header("Accept", "application/octet-stream") // needed for github api downloads, could be changed with a new download_opts variant
-            .call()
-            .with_context(|| format!("failed to send download request for {url}"))
+            .run(request)
+            .context("failed to send download request")
             .map_err(to_runtime_error)?;
 
         let dest_path = working_directory.join(destination);
@@ -237,7 +279,7 @@ mod fs {
             &mut response.body_mut().as_reader(),
             &mut BufWriter::new(file),
         )
-        .with_context(|| format!("failed to write download of {url} to {dest_path:?}"))
+        .with_context(|| format!("failed to write download to {dest_path:?}"))
         .map_err(to_runtime_error)?;
 
         Ok(())
@@ -336,12 +378,18 @@ mod github {
         runtime.ensure_idempotence_not_required()?;
         let http_agent = runtime.http_agent()?;
 
-        let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+        let request = HttpRequest::new(
+            "GET".into(),
+            format!("https://api.github.com/repos/{repo}/releases/latest"),
+        )
+        .request()
+        .with_context(|| format!("failed to build latest release request for {repo}"))
+        .map_err(to_runtime_error)?;
+
         let release = http_agent
-            .get(&url)
-            .call()
+            .run(request)
             .and_then(|mut r| r.body_mut().read_to_string())
-            .with_context(|| format!("failed to fetch latest release of {repo} at {url}"))
+            .with_context(|| format!("failed to fetch latest release of {repo}"))
             .map_err(to_runtime_error)?;
 
         let dynamic = ctx.engine().parse_json(&release, true)?;
@@ -375,12 +423,18 @@ mod github {
             object: GitObject,
         }
 
-        let url = format!("https://api.github.com/repos/{repo}/git/refs/heads/{branch}");
+        let request = HttpRequest::new(
+            "GET".into(),
+            format!("https://api.github.com/repos/{repo}/git/refs/heads/{branch}"),
+        )
+        .request()
+        .with_context(|| format!("failed to build latest ref request for {repo}#{branch}"))
+        .map_err(to_runtime_error)?;
+
         let fetched_repo: GitRef = http_agent
-            .get(&url)
-            .call()
+            .run(request)
             .and_then(|mut r| r.body_mut().read_json())
-            .with_context(|| format!("failed to fetch latest ref for {repo}#{branch} at {url}"))
+            .with_context(|| format!("failed to fetch latest ref for {repo}#{branch}"))
             .map_err(to_runtime_error)?;
 
         trace!("repo {repo}#{branch} is at {}", fetched_repo.object.sha);
@@ -388,7 +442,10 @@ mod github {
     }
 
     #[rhai_fn(pure, return_raw, global)]
-    pub fn asset(release: &mut Map, asset_name: &str) -> Result<Map, Box<EvalAltResult>> {
+    pub fn asset_url(
+        release: &mut Map,
+        asset_name: &str,
+    ) -> Result<HttpRequest, Box<EvalAltResult>> {
         let assets_dyn = match release.get("assets") {
             Some(a) => a,
             None => return Err("invalid relase: missing assets field".into()),
@@ -432,38 +489,37 @@ mod github {
             };
 
             if asset_name == *name {
-                return Ok(asset.clone());
+                let url_dyn = match asset.get("url") {
+                    Some(a) => a,
+                    None => return Err("invalid relase: missing asset url field".into()),
+                };
+
+                let url = match url_dyn.as_immutable_string_ref() {
+                    Ok(n) => n,
+                    Err(t) => {
+                        return Err(format!(
+                            "invalid release: expected asset url fields to be strings, got a {t}"
+                        )
+                        .into());
+                    }
+                };
+
+                let mut req = HttpRequest::new("GET".into(), url.to_string());
+                req.add_header("Accept".into(), "application/octet-stream".into());
+                return Ok(req);
             }
         }
 
         Err("asset not found".into())
     }
 
-    pub fn tarball_url(repo: &str, reference: &str) -> String {
-        format!("https://api.github.com/repos/{repo}/tarball/{reference}")
-    }
-}
-
-#[export_module]
-mod http {
-    use anyhow::Context;
-    use rhai::Blob;
-
-    #[rhai_fn(volatile, return_raw)]
-    pub fn get(ctx: NativeCallContext, url: &str) -> Result<Blob, Box<EvalAltResult>> {
-        trace!("fetching http url {url}");
-
-        let runtime = Runtime::from_tag(ctx.tag());
-        let http_agent = runtime.http_agent()?;
-
-        let body: Vec<u8> = http_agent
-            .get(url)
-            .call()
-            .and_then(|mut r| r.body_mut().read_to_vec())
-            .with_context(|| format!("failed to fetch http url {url}"))
-            .map_err(to_runtime_error)?;
-
-        Ok(body)
+    pub fn tarball_url(repo: &str, reference: &str) -> HttpRequest {
+        let mut req = HttpRequest::new(
+            "GET".into(),
+            format!("https://api.github.com/repos/{repo}/tarball/{reference}"),
+        );
+        req.add_header("Accept".into(), "application/vnd.github+json".into());
+        req
     }
 }
 

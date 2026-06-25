@@ -11,7 +11,7 @@ fn latest_version() {
 
 fn build(version) {
     fs::download(
-        version.metadata.asset(`ppmx-${env::OS}-${env::ARCH}`).url,
+        version.metadata.asset_url(`ppmx-${env::OS}-${env::ARCH}`),
         "ppmx"
     );
 

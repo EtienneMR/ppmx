@@ -17,7 +17,7 @@ fn dependencies() {
 
 fn build(version) {
     fs::download(
-        version.metadata.asset(`tbx-${env::OS}`).url,
+        version.metadata.asset_url(`tbx-${env::OS}`),
         "tbx"
     );
 
